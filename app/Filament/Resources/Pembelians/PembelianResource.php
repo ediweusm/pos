@@ -1,0 +1,52 @@
+<?php
+
+namespace App\Filament\Resources\Pembelians;
+
+use App\Filament\Resources\Pembelians\Pages\CreatePembelian;
+use App\Filament\Resources\Pembelians\Pages\EditPembelian;
+use App\Filament\Resources\Pembelians\Pages\ListPembelians;
+use App\Filament\Resources\Pembelians\Schemas\PembelianForm;
+use App\Filament\Resources\Pembelians\Tables\PembeliansTable;
+use App\Models\Pembelian;
+use BackedEnum;
+use Filament\Resources\Resource;
+use Filament\Schemas\Schema;
+use Filament\Support\Icons\Heroicon;
+use Filament\Tables\Table;
+
+class PembelianResource extends Resource
+{
+    protected static ?string $model = Pembelian::class;
+
+    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-shopping-cart';
+
+    protected static ?string $modelLabel = 'Faktur Pembelian (Masuk)';
+    protected static ?string $pluralModelLabel = 'Faktur Pembelian';
+    protected static string|\UnitEnum|null $navigationGroup = 'Transaksi';
+
+    public static function form(Schema $schema): Schema
+    {
+        return PembelianForm::configure($schema);
+    }
+
+    public static function table(Table $table): Table
+    {
+        return PembeliansTable::configure($table);
+    }
+
+    public static function getRelations(): array
+    {
+        return [
+            //
+        ];
+    }
+
+    public static function getPages(): array
+    {
+        return [
+            'index' => ListPembelians::route('/'),
+            'create' => CreatePembelian::route('/create'),
+            'edit' => EditPembelian::route('/{record}/edit'),
+        ];
+    }
+}
