@@ -11,6 +11,7 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Spatie\Permission\Traits\HasRoles;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Filament\Models\Contracts\FilamentUser;
 
 #[Fillable(['name', 'email', 'password', 'cabang_id', 'gudang_id'])]
 #[Hidden(['password', 'remember_token'])]
