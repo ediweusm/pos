@@ -334,15 +334,15 @@ class SimulationSeeder extends Seeder
         );
 
         // 9. Seed Default Super Admin User
-        $adminUser = User::updateOrCreate(
-            ['email' => 'ediwidodo@gmail.com'],
-            [
-                'name' => 'Administrator POS',
-                'password' => Hash::make('admin123'),
-            ]
-        );
+        // $adminUser = User::updateOrCreate(
+        //     ['email' => 'ediwidodo@gmail.com'],
+        //     [
+        //         'name' => 'Administrator POS',
+        //         'password' => Hash::make('admin123'),
+        //     ]
+        // );
 
         // Pastikan role super_admin ditugaskan ke user ini
-        $adminUser->assignRole('super_admin');
+        // $adminUser->assignRole('super_admin');
     }
 }
