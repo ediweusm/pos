@@ -12,6 +12,7 @@ use Illuminate\Notifications\Notifiable;
 use Spatie\Permission\Traits\HasRoles;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Filament\Models\Contracts\FilamentUser;
+use Filament\Panel;
 
 #[Fillable(['name', 'email', 'password', 'cabang_id', 'gudang_id'])]
 #[Hidden(['password', 'remember_token'])]
@@ -51,5 +52,10 @@ class User extends Authenticatable implements FilamentUser
     public function getOpenShift(): ?PosShift
     {
         return PosShift::where('user_id', $this->id)->where('status', 'OPEN')->first();
+    }
+    public function canAccessPanel(Panel $panel): bool
+    {
+        // Mengizinkan user dengan role 'super_admin' atau yang memiliki minimal satu role untuk masuk ke panel
+        return $this->hasRole('super_admin') || $this->roles()->exists();
     }
 }

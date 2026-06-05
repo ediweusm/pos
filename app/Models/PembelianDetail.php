@@ -19,4 +19,9 @@ class PembelianDetail extends Model
     {
         return $this->belongsTo(Produk::class, 'produk_id');
     }
+
+    public function satuan(): BelongsTo
+    {
+        return $this->belongsTo(Satuan::class, 'satuan_id');
+    }
 }

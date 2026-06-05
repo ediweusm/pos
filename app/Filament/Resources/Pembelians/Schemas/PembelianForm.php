@@ -91,7 +91,39 @@ class PembelianForm
                                     ->searchable()
                                     ->preload()
                                     ->required()
+                                    ->live()
+                                    ->afterStateUpdated(fn (Set $set) => $set('satuan_id', null))
                                     ->columnSpan(3),
+                                Select::make('satuan_id')
+                                    ->label('Satuan')
+                                    ->options(function (Get $get) {
+                                        $produkId = $get('produk_id');
+                                        if (!$produkId) {
+                                            return [];
+                                        }
+                                        
+                                        $produk = \App\Models\Produk::with('satuanDasar')->find($produkId);
+                                        $options = [];
+                                        if ($produk && $produk->satuanDasar) {
+                                            $options[$produk->satuan_dasar_id] = $produk->satuanDasar->nama . ' (Utama)';
+                                        }
+
+                                        $konversis = \App\Models\ProdukKonversi::where('produk_id', $produkId)
+                                            ->with('satuan')
+                                            ->get();
+
+                                        foreach ($konversis as $konversi) {
+                                            if ($konversi->satuan) {
+                                                $options[$konversi->satuan_id] = $konversi->satuan->nama;
+                                            }
+                                        }
+
+                                        return $options;
+                                    })
+                                    ->searchable()
+                                    ->preload()
+                                    ->required()
+                                    ->columnSpan(2),
                                 TextInput::make('qty')
                                     ->numeric()
                                     ->required()
@@ -104,12 +136,12 @@ class PembelianForm
                                     ->required()
                                     ->live(onBlur: true)
                                     ->afterStateUpdated(fn (Get $get, Set $set) => self::updateBarisTotal($get, $set))
-                                    ->columnSpan(3),
+                                    ->columnSpan(2),
                                 TextInput::make('subtotal')
                                     ->numeric()
                                     ->disabled()
                                     ->dehydrated() // Penting: Agar kolom yang didisable tetap disimpan ke database
-                                    ->columnSpan(4),
+                                    ->columnSpan(3),
                             ])
                             ->columns(12)
                             ->live(onBlur: true)

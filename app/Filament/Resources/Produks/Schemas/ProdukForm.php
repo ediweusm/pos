@@ -93,6 +93,32 @@ class ProdukForm
                                     : null
                             )
                     ]),
+
+                // SECTION 3: KONVERSI SATUAN (UoM)
+                Section::make('Konversi Satuan (UoM)')
+                    ->columnSpan('full')
+                    ->description('Atur konversi satuan alternatif untuk produk ini.')
+                    ->schema([
+                        Repeater::make('konversi')
+                            ->relationship('konversi')
+                            ->schema([
+                                Select::make('satuan_id')
+                                    ->relationship('satuan', 'nama')
+                                    ->required()
+                                    ->label('Satuan Alternatif')
+                                    ->searchable()
+                                    ->preload(),
+                                TextInput::make('faktor_pengali')
+                                    ->numeric()
+                                    ->required()
+                                    ->label('Faktor Pengali')
+                                    ->helperText('Nilai konversi dari satuan alternatif menuju satuan dasar (misal: jika satuan dasar Kg, dan satuan alternatif Sak 50kg, maka pengalinya adalah 50).')
+                                    ->placeholder('Misal: 50.00'),
+                            ])
+                            ->columns(2)
+                            ->addActionLabel('+ Tambah Konversi Satuan')
+                            ->reorderable(false)
+                    ]),
             ]);
     }
 }

@@ -70,4 +70,9 @@ class Produk extends Model
     {
         return $this->hasMany(StokSaldo::class, 'produk_id');
     }
+
+    public function konversi(): HasMany
+    {
+        return $this->hasMany(ProdukKonversi::class, 'produk_id');
+    }
 }

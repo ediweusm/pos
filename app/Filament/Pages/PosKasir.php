@@ -121,7 +121,7 @@ class PosKasir extends Page
             return;
         }
 
-        $this->searchResults = Produk::with('harga')
+        $this->searchResults = Produk::with(['harga', 'stokSaldos'])
             ->where(function ($q) use ($keyword) {
                 $q->where('nama', 'like', '%' . $keyword . '%')
                   ->orWhere('sku', 'like', '%' . $keyword . '%')
@@ -130,6 +130,16 @@ class PosKasir extends Page
             ->where('is_aktif', true)
             ->take(7) // Pembatasan limit item untuk menjaga performa rendering
             ->get(['id', 'nama', 'sku', 'barcode', 'satuan_dasar_id'])
+            ->map(function ($produk) {
+                return [
+                    'id'              => $produk->id,
+                    'nama'            => $produk->nama,
+                    'sku'             => $produk->sku,
+                    'barcode'         => $produk->barcode,
+                    'satuan_dasar_id' => $produk->satuan_dasar_id,
+                    'stok'            => (float) $produk->stokSaldos->sum('qty_sekarang'),
+                ];
+            })
             ->toArray();
     }
 
@@ -197,6 +207,7 @@ class PosKasir extends Page
     {
         $id       = $produk->id;
         $satuanId = $produk->satuan_dasar_id;
+        $qtyBaru  = 1;
 
         if (isset($this->cart[$id])) {
             $qtyBaru = $this->cart[$id]['qty'] + 1;
@@ -235,6 +246,16 @@ class PosKasir extends Page
             ];
         }
 
+        // Soft-Filter Warning: Cek jika kuantitas melebihi sisa stok sistem
+        $stok = (float) $produk->stokSaldos()->sum('qty_sekarang');
+        if ($qtyBaru > $stok) {
+            Notification::make()
+                ->title('Peringatan: Stok Kurang')
+                ->body("Kuantitas ({$qtyBaru}) melebihi stok sistem untuk produk {$produk->nama}. Sisa stok: {$stok}. Stok akan menjadi minus.")
+                ->warning()
+                ->send();
+        }
+
         $this->hitungTotal();
     }
 
@@ -259,6 +280,18 @@ class PosKasir extends Page
             $this->cart[$id]['harga_jual'] = $hargaJual;
             $this->cart[$id]['subtotal']   = $qtyBaru * $hargaJual;
             $this->cart[$id]['tipe_harga'] = $hargaAktif ? $hargaAktif->tipe_harga : 'TIDAK ADA HARGA';
+
+            // Soft-Filter Warning: Cek jika kuantitas melebihi sisa stok sistem
+            if ($produk) {
+                $stok = (float) $produk->stokSaldos()->sum('qty_sekarang');
+                if ($qtyBaru > $stok) {
+                    Notification::make()
+                        ->title('Peringatan: Stok Kurang')
+                        ->body("Kuantitas ({$qtyBaru}) melebihi stok sistem untuk produk {$produk->nama}. Sisa stok: {$stok}. Stok akan menjadi minus.")
+                        ->warning()
+                        ->send();
+                }
+            }
         }
 
         $this->hitungTotal();

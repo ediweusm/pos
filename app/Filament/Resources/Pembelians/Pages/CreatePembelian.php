@@ -27,44 +27,7 @@ class CreatePembelian extends CreateRecord
         $pembelian = $this->record;
 
         DB::transaction(function () use ($pembelian) {
-            // 1. Loop setiap barang yang dibeli (BLOK LOGISTIK - TIDAK BERUBAH)
-            foreach ($pembelian->detail as $item) {
-                
-                // A. AMBIL/BUAT SNAPSHOT STOK SAAT INI
-                $stok = StokSaldo::firstOrCreate(
-                    ['gudang_id' => $pembelian->gudang_id, 'produk_id' => $item->produk_id],
-                    ['qty_sekarang' => 0, 'harga_pokok_rata_rata' => 0]
-                );
-
-                $stokLama = $stok->qty_sekarang;
-                $hargaRataLama = $stok->harga_pokok_rata_rata;
-
-                // B. HITUNG MOVING AVERAGE BARU
-                $totalNilaiLama = $stokLama * $hargaRataLama;
-                $totalNilaiBaru = $item->qty * $item->harga_beli_satuan;
-                $totalStokBaru = $stokLama + $item->qty;
-                
-                // Cegah pembagian dengan nol
-                $hargaRataBaru = $totalStokBaru > 0 ? ($totalNilaiLama + $totalNilaiBaru) / $totalStokBaru : 0;
-
-                // C. UPDATE SNAPSHOT
-                $stok->update([
-                    'qty_sekarang' => $totalStokBaru,
-                    'harga_pokok_rata_rata' => $hargaRataBaru
-                ]);
-
-                // D. CATAT KE KARTU STOK (JURNAL BARANG)
-                JurnalBarang::create([
-                    'produk_id' => $item->produk_id,
-                    'gudang_id' => $pembelian->gudang_id,
-                    'tipe_mutasi' => 'PURCHASE',
-                    'referensi_tipe' => get_class($pembelian),
-                    'referensi_id' => $pembelian->id,
-                    'qty_in' => $item->qty,
-                    'qty_out' => 0,
-                    'harga_satuan' => $item->harga_beli_satuan,
-                ]);
-            }
+            // 1. Logistik update is now handled automatically by App\Observers\PembelianDetailObserver.
 
             // 2. AUTO-JOURNALING KEUANGAN (DOUBLE-ENTRY) DINAMIS VIA akun_cfg
             $jurnal = Jurnal::create([

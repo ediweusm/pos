@@ -86,7 +86,7 @@
                                 >
                                     <div class="flex flex-col">
                                         <span class="font-medium text-gray-900 dark:text-gray-100 group-hover:text-primary-600 dark:group-hover:text-primary-400">
-                                            {{ $result['nama'] }}
+                                            {{ $result['nama'] }} (Sisa Stok: {{ $result['stok'] ?? 0 }})
                                         </span>
                                         <span class="text-xs text-gray-400">
                                             SKU: {{ $result['sku'] ?? '-' }} | Barcode: {{ $result['barcode'] ?? '-' }}

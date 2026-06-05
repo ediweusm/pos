@@ -22,6 +22,7 @@ class AkunCfgSeeder extends Seeder
             ['id' => 11, 'kode_event' => 'PURCHASE_TUNAI', 'nama_event' => 'Pembelian Stok Barang (Tunai)', 'akun_debit_id' => 6, 'akun_kredit_id' => 2, 'created_at' => '2026-05-30 18:32:34', 'updated_at' => '2026-05-30 18:32:34'],
             ['id' => 12, 'kode_event' => 'PURCHASE_BANK', 'nama_event' => 'Pembelian Stok Barang (Transfer/Bank)', 'akun_debit_id' => 6, 'akun_kredit_id' => 3, 'created_at' => '2026-05-30 18:32:34', 'updated_at' => '2026-05-30 18:32:34'],
             ['id' => 13, 'kode_event' => 'PURCHASE_TEMPO', 'nama_event' => 'Pembelian Stok Barang (Tempo/Kredit)', 'akun_debit_id' => 6, 'akun_kredit_id' => 7, 'created_at' => '2026-05-30 18:32:34', 'updated_at' => '2026-05-30 18:32:34'],
+            ['id' => 14, 'kode_event' => 'SHIFT_KASIR', 'nama_event' => 'Modal Buka Shift Kasir', 'akun_debit_id' => 1, 'akun_kredit_id' => 2, 'created_at' => '2026-05-30 18:32:34', 'updated_at' => '2026-05-30 18:32:34'],
         ];
 
         DB::table('akun_cfg')->insert($data);
