@@ -15,6 +15,9 @@ use App\Models\PosTransaksiDetail;
 use App\Models\PosShift;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class PosKasir extends Page
 {
@@ -24,6 +27,11 @@ class PosKasir extends Page
     protected static string|\UnitEnum|null $navigationGroup = 'Transaksi';
     protected static ?int $navigationSort = 1;
     protected string $view = 'filament.pages.pos-kasir';
+
+    public static function canAccess(): bool
+    {
+        return auth()->user()?->can('View:PosKasir') ?? false;
+    }
 
     public function mount(): void
     {
@@ -121,7 +129,10 @@ class PosKasir extends Page
             return;
         }
 
-        $this->searchResults = Produk::with(['harga', 'stokSaldos'])
+        $this->searchResults = Produk::with([
+            'harga',
+            'stokSaldos' => fn ($query) => $query->where('gudang_id', $this->gudangId),
+        ])
             ->where(function ($q) use ($keyword) {
                 $q->where('nama', 'like', '%' . $keyword . '%')
                   ->orWhere('sku', 'like', '%' . $keyword . '%')
@@ -247,11 +258,13 @@ class PosKasir extends Page
         }
 
         // Soft-Filter Warning: Cek jika kuantitas melebihi sisa stok sistem
-        $stok = (float) $produk->stokSaldos()->sum('qty_sekarang');
+        $stok = (float) $produk->stokSaldos()
+            ->where('gudang_id', $this->gudangId)
+            ->sum('qty_sekarang');
         if ($qtyBaru > $stok) {
             Notification::make()
                 ->title('Peringatan: Stok Kurang')
-                ->body("Kuantitas ({$qtyBaru}) melebihi stok sistem untuk produk {$produk->nama}. Sisa stok: {$stok}. Stok akan menjadi minus.")
+                ->body("Kuantitas ({$qtyBaru}) melebihi stok gudang kasir untuk produk {$produk->nama}. Sisa stok: {$stok}. Checkout akan ditolak.")
                 ->warning()
                 ->send();
         }
@@ -283,11 +296,13 @@ class PosKasir extends Page
 
             // Soft-Filter Warning: Cek jika kuantitas melebihi sisa stok sistem
             if ($produk) {
-                $stok = (float) $produk->stokSaldos()->sum('qty_sekarang');
+                $stok = (float) $produk->stokSaldos()
+                    ->where('gudang_id', $this->gudangId)
+                    ->sum('qty_sekarang');
                 if ($qtyBaru > $stok) {
                     Notification::make()
                         ->title('Peringatan: Stok Kurang')
-                        ->body("Kuantitas ({$qtyBaru}) melebihi stok sistem untuk produk {$produk->nama}. Sisa stok: {$stok}. Stok akan menjadi minus.")
+                        ->body("Kuantitas ({$qtyBaru}) melebihi stok gudang kasir untuk produk {$produk->nama}. Sisa stok: {$stok}. Checkout akan ditolak.")
                         ->warning()
                         ->send();
                 }
@@ -359,32 +374,66 @@ class PosKasir extends Page
 
     public function prosesPembayaran(): void
     {
-        if (empty($this->cart)) return;
-
-        if ($this->metodeBayar === 'TUNAI' && $this->tunaiDiterima < $this->grandTotal) {
-            Notification::make()
-                ->title('Uang kurang')
-                ->body('Nominal tunai yang diterima tidak mencukupi.')
-                ->danger()
-                ->send();
+        if (empty($this->cart)) {
             return;
         }
 
         try {
             $transaksi = DB::transaction(function () {
-                $nomorNota = 'POS-' . date('YmdHis') . '-' . Auth::id();
+                $this->validateCheckoutInput();
+
+                $shift = PosShift::query()
+                    ->where('user_id', Auth::id())
+                    ->where('status', 'OPEN')
+                    ->lockForUpdate()
+                    ->first();
+
+                if (! $shift) {
+                    throw ValidationException::withMessages([
+                        'shift' => 'Shift kasir sudah ditutup atau tidak lagi tersedia.',
+                    ]);
+                }
+
+                // Never trust hydrated Livewire cart values for final prices or stock.
+                $items = $this->buildCheckoutItems();
+                $subtotal = array_sum(array_column($items, 'subtotal'));
+                $diskon = round((float) $this->diskon, 2);
+
+                if ($diskon < 0 || $diskon > $subtotal) {
+                    throw ValidationException::withMessages([
+                        'diskon' => 'Diskon tidak valid.',
+                    ]);
+                }
+
+                $grandTotal = round($subtotal - $diskon, 2);
+                $isTempo = $this->statusPembayaran === 'TEMPO';
+                $tunaiDiterima = $isTempo
+                    ? 0
+                    : ($this->metodeBayar === 'TUNAI' ? round((float) $this->tunaiDiterima, 2) : $grandTotal);
+
+                if (! $isTempo && $this->metodeBayar === 'TUNAI' && $tunaiDiterima < $grandTotal) {
+                    throw ValidationException::withMessages([
+                        'tunaiDiterima' => 'Nominal tunai yang diterima tidak mencukupi.',
+                    ]);
+                }
+
+                $kembalian = $this->metodeBayar === 'TUNAI'
+                    ? round(max(0, $tunaiDiterima - $grandTotal), 2)
+                    : 0;
+                $nomorNota = 'POS-' . Str::upper((string) Str::ulid());
 
                 // 1. BUAT HEADER TRANSAKSI
                 $transaksi = PosTransaksi::create([
                     'nomor_nota'        => $nomorNota,
-                    'gudang_id'         => $this->gudangId,
+                    'gudang_id'         => $shift->gudang_id,
                     'kasir_id'          => Auth::id(),
+                    'pos_shift_id'      => $shift->id,
                     'pelanggan_id'      => $this->pelangganId,
-                    'subtotal'          => array_sum(array_column($this->cart, 'subtotal')),
-                    'diskon_nominal'    => $this->diskon,
-                    'grand_total'       => $this->grandTotal,
-                    'tunai_diterima'    => $this->tunaiDiterima,
-                    'kembalian'         => $this->kembalian,
+                    'subtotal'          => $subtotal,
+                    'diskon_nominal'    => $diskon,
+                    'grand_total'       => $grandTotal,
+                    'tunai_diterima'    => $tunaiDiterima,
+                    'kembalian'         => $kembalian,
                     'metode_bayar'      => $this->metodeBayar,
                     'tipe_order'        => $this->tipeOrder,
                     'status_pembayaran' => $this->statusPembayaran,
@@ -392,10 +441,10 @@ class PosKasir extends Page
                     'status'            => 'SELESAI',
                 ]);
 
-                // Update total_penjualan di shift aktif
-                $openShift = Auth::user()->getOpenShift();
-                if ($openShift) {
-                    $openShift->increment('total_penjualan', $this->grandTotal);
+                // The cash drawer contains only paid cash sales. QRIS, transfer,
+                // and receivables are reconciled outside the physical drawer.
+                if (! $isTempo && $this->metodeBayar === 'TUNAI') {
+                    $shift->increment('total_penjualan', $grandTotal);
                 }
 
                 // 2. AMBIL KONFIGURASI COA BERDASARKAN METODE BAYAR
@@ -419,27 +468,35 @@ class PosKasir extends Page
                 $cfgHPP       = AkunCfg::where('kode_event', 'POS_HPP')->first();
 
                 // Validasi agar sistem tidak crash jika config belum dibuat (opsional tapi disarankan)
-                if (!$cfgPenjualan) {
-                    throw new \Exception("Konfigurasi akun_cfg untuk event '{$kodeEvent}' belum diatur.");
+                if (! $cfgPenjualan || ! $cfgHPP) {
+                    throw new \Exception("Konfigurasi akun untuk event '{$kodeEvent}' atau 'POS_HPP' belum diatur.");
                 }
 
                 // 3. BUAT JURNAL HEADER
                 $jurnal = Jurnal::create([
-                    'nomor_jurnal'   => 'JRN-POS-' . time(),
+                    'nomor_jurnal'   => 'JRN-POS-' . Str::upper((string) Str::ulid()),
                     'tanggal'        => now()->toDateString(),
                     'keterangan'     => 'Penjualan POS Nota: ' . $nomorNota,
                     'referensi_tipe' => PosTransaksi::class,
                     'referensi_id'   => $transaksi->id,
+                    'cabang_id'      => $shift->cabang_id,
                 ]);
 
                 $totalHPP = 0;
 
                 // 4. LOOP PER ITEM KERANJANG
-                foreach ($this->cart as $produkId => $item) {
-                    $stok = StokSaldo::firstOrCreate(
-                        ['gudang_id' => $this->gudangId, 'produk_id' => $produkId],
-                        ['qty_sekarang' => 0, 'harga_pokok_rata_rata' => 0]
-                    );
+                foreach ($items as $produkId => $item) {
+                    $stok = StokSaldo::query()
+                        ->where('gudang_id', $shift->gudang_id)
+                        ->where('produk_id', $produkId)
+                        ->lockForUpdate()
+                        ->first();
+
+                    if (! $stok || (float) $stok->qty_sekarang < $item['qty']) {
+                        throw ValidationException::withMessages([
+                            'stock' => "Stok {$item['nama']} tidak mencukupi di gudang kasir.",
+                        ]);
+                    }
 
                     $hppSatuan = (float) $stok->harga_pokok_rata_rata;
                     $hppTotal  = $hppSatuan * $item['qty'];
@@ -458,7 +515,7 @@ class PosKasir extends Page
 
                     JurnalBarang::create([
                         'produk_id'      => $produkId,
-                        'gudang_id'      => $this->gudangId,
+                        'gudang_id'      => $shift->gudang_id,
                         'tipe_mutasi'    => 'SALE',
                         'referensi_tipe' => PosTransaksi::class,
                         'referensi_id'   => $transaksi->id,
@@ -473,19 +530,19 @@ class PosKasir extends Page
                     AkunTrans::create([
                         'jurnal_id' => $jurnal->id,
                         'akun_id'   => $cfgPenjualan->akun_debit_id,
-                        'debit'     => $this->grandTotal,
+                        'debit'     => $grandTotal,
                         'kredit'    => 0,
                     ]);
                     AkunTrans::create([
                         'jurnal_id' => $jurnal->id,
                         'akun_id'   => $cfgPenjualan->akun_kredit_id,
                         'debit'     => 0,
-                        'kredit'    => $this->grandTotal,
+                        'kredit'    => $grandTotal,
                     ]);
                 }
 
                 // 6. JURNAL HPP
-                if ($cfgHPP && $totalHPP > 0) {
+                if ($totalHPP > 0) {
                     AkunTrans::create([
                         'jurnal_id' => $jurnal->id,
                         'akun_id'   => $cfgHPP->akun_debit_id,
@@ -504,7 +561,7 @@ class PosKasir extends Page
             });
 
             // SUKSES: Reset state & notifikasi
-            $kembalian = $this->kembalian;
+            $kembalian = (float) $transaksi->kembalian;
             $idTransaksiBaru = $transaksi->id;
             $this->bersihkanKeranjang();
 
@@ -522,6 +579,12 @@ class PosKasir extends Page
             // DISPATCH EVENT KE BROWSER UNTUK BUKA TAB BARU CETAK STRUK
             $this->dispatch('cetak-struk', ['url' => route('cetak.struk-pos', $idTransaksiBaru)]);
 
+        } catch (ValidationException $e) {
+            Notification::make()
+                ->title('Transaksi Ditolak')
+                ->body(collect($e->errors())->flatten()->first())
+                ->warning()
+                ->send();
         } catch (\Throwable $e) {
             Notification::make()
                 ->title('Transaksi Gagal')
@@ -529,6 +592,83 @@ class PosKasir extends Page
                 ->danger()
                 ->send();
         }
+    }
+
+    private function validateCheckoutInput(): void
+    {
+        Validator::make([
+            'metode_bayar' => $this->metodeBayar,
+            'status_pembayaran' => $this->statusPembayaran,
+            'tipe_order' => $this->tipeOrder,
+            'pelanggan_id' => $this->pelangganId,
+            'alamat_pengiriman' => $this->alamatPengiriman,
+        ], [
+            'metode_bayar' => ['required', 'in:TUNAI,QRIS,TRANSFER'],
+            'status_pembayaran' => ['required', 'in:LUNAS,TEMPO'],
+            'tipe_order' => ['required', 'in:TAKE_AWAY,DELIVERY'],
+            'pelanggan_id' => ['nullable', 'integer', 'exists:pelanggan,id'],
+            'alamat_pengiriman' => ['nullable', 'string', 'max:2000'],
+        ])->after(function ($validator) {
+            if ($this->statusPembayaran === 'TEMPO' && ! $this->pelangganId) {
+                $validator->errors()->add('pelanggan_id', 'Pelanggan wajib dipilih untuk transaksi tempo.');
+            }
+
+            if ($this->tipeOrder === 'DELIVERY' && blank(trim($this->alamatPengiriman))) {
+                $validator->errors()->add('alamat_pengiriman', 'Alamat pengiriman wajib diisi untuk delivery.');
+            }
+        })->validate();
+    }
+
+    /**
+     * Rebuild server-side transaction lines to prevent client-side price and
+     * product state tampering. Quantity remains in the product base unit.
+     *
+     * @return array<int, array{nama: string, qty: float, harga_jual: float, subtotal: float}>
+     */
+    private function buildCheckoutItems(): array
+    {
+        $items = [];
+
+        foreach ($this->cart as $productId => $cartItem) {
+            $qty = round((float) ($cartItem['qty'] ?? 0), 2);
+            if ($qty <= 0 || $qty > 100000) {
+                throw ValidationException::withMessages([
+                    'cart' => 'Kuantitas produk harus lebih dari nol dan dalam batas yang diizinkan.',
+                ]);
+            }
+
+            $produk = Produk::query()
+                ->whereKey((int) $productId)
+                ->where('is_aktif', true)
+                ->first();
+
+            if (! $produk) {
+                throw ValidationException::withMessages([
+                    'cart' => 'Salah satu produk tidak lagi aktif atau tidak ditemukan.',
+                ]);
+            }
+
+            $harga = $produk->getHargaBerlaku($produk->satuan_dasar_id, $qty);
+            if (! $harga) {
+                throw ValidationException::withMessages([
+                    'cart' => "Harga untuk produk {$produk->nama} belum diatur.",
+                ]);
+            }
+
+            $hargaJual = round((float) $harga->harga, 2);
+            $items[$produk->id] = [
+                'nama' => $produk->nama,
+                'qty' => $qty,
+                'harga_jual' => $hargaJual,
+                'subtotal' => round($qty * $hargaJual, 2),
+            ];
+        }
+
+        if ($items === []) {
+            throw ValidationException::withMessages(['cart' => 'Keranjang kosong.']);
+        }
+
+        return $items;
     }
 
     // ─── HELPERS ──────────────────────────────────────────────────────────

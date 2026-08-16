@@ -7,6 +7,29 @@
 <a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
 </p>
 
+## POS
+
+Laravel/Filament Point of Sale dengan stok per gudang, shift kasir, dan jurnal akuntansi.
+
+### Keamanan operasional
+
+- Jangan menjalankan seeder dengan akun default. Jika perlu bootstrap administrator pada lingkungan non-produksi, set `POS_SEED_ADMIN_EMAIL` dan `POS_SEED_ADMIN_PASSWORD` secara eksplisit.
+- Terapkan migrasi sebelum deploy kode: `php artisan migrate --force`.
+- Kasir hanya boleh memiliki role `Kasir`; pengaturan master, akuntansi, laporan, dan audit harus diberikan lewat role terpisah.
+- Pastikan konfigurasi akun untuk `POS_SALE_*`, `POS_HPP`, `KAS_DEFISIT`, `KAS_SURPLUS`, dan `SHIFT_KASIR` tersedia sebelum toko dibuka.
+
+### Validasi sebelum produksi
+
+```bash
+composer install --no-dev --optimize-autoloader
+php artisan migrate --force
+php artisan test
+php artisan config:cache
+php artisan route:cache
+```
+
+---
+
 ## About Laravel
 
 Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:

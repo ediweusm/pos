@@ -10,11 +10,19 @@ class UserSeeder extends Seeder
 {
     public function run(): void
     {
+        $email = env('POS_SEED_ADMIN_EMAIL');
+        $password = env('POS_SEED_ADMIN_PASSWORD');
+
+        if (blank($email) || blank($password)) {
+            $this->command?->warn('Admin seed skipped: set POS_SEED_ADMIN_EMAIL and POS_SEED_ADMIN_PASSWORD explicitly.');
+            return;
+        }
+
         $user = User::firstOrCreate(
-            ['email' => 'admin@posme.com'], // Ganti dengan email login Anda
+            ['email' => $email],
             [
                 'name' => 'Super Admin',
-                'password' => Hash::make('adminposme123'), // Ganti dengan password Anda
+                'password' => Hash::make($password),
             ]
         );
         

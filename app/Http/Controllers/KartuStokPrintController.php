@@ -13,8 +13,14 @@ class KartuStokPrintController extends Controller
 {
     public function print(Request $request)
     {
+        $this->requirePermission($request, 'ViewAny:JurnalBarang');
+
         $produkId = $request->produk_id;
         $gudangId = $request->gudang_id;
+        if (! $request->user()->hasRole('super_admin')) {
+            abort_unless($request->user()->gudang_id, 403);
+            $gudangId = $request->user()->gudang_id;
+        }
         $dariTanggal = $request->dari_tanggal ?? now()->startOfMonth()->format('Y-m-d');
         $sampaiTanggal = $request->sampai_tanggal ?? now()->endOfMonth()->format('Y-m-d');
 

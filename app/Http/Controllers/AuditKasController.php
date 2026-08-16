@@ -11,6 +11,8 @@ class AuditKasController extends Controller
 {
     public function print(Request $request)
     {
+        $this->requirePermission($request, 'ViewAny:AuditKas');
+
         $akunId = $request->akun_id;
         $dariTanggal = $request->dari_tanggal;
         $sampaiTanggal = $request->sampai_tanggal;

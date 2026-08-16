@@ -30,7 +30,7 @@ class ShiftKasirForm
                                     ->visible(fn ($livewire) => $livewire instanceof \Filament\Resources\Pages\EditRecord),
 
                                 TextInput::make('total_penjualan')
-                                    ->label('Total Penjualan Ritel POS')
+                                    ->label('Penjualan Tunai (Laci Kas)')
                                     ->numeric()
                                     ->prefix('Rp')
                                     ->disabled()

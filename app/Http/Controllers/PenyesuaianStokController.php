@@ -12,7 +12,13 @@ class PenyesuaianStokController extends Controller
 {
     public function print(Request $request)
     {
+        $this->requirePermission($request, 'ViewAny:PenyesuaianStok');
+
         $gudangId = $request->gudang_id;
+        if (! $request->user()->hasRole('super_admin')) {
+            abort_unless($request->user()->gudang_id, 403);
+            $gudangId = $request->user()->gudang_id;
+        }
         $produkId = $request->produk_id;
         $dariTanggal = $request->dari_tanggal;
         $sampaiTanggal = $request->sampai_tanggal;

@@ -8,6 +8,9 @@ use Filament\Resources\Pages\EditRecord;
 use Illuminate\Support\Facades\DB;
 use App\Models\Jurnal;
 use App\Models\AkunTrans;
+use App\Models\AkunCfg;
+use App\Models\PosTransaksi;
+use Illuminate\Support\Str;
 
 class EditShiftKasir extends EditRecord
 {
@@ -40,7 +43,12 @@ class EditShiftKasir extends EditRecord
         $data['status'] = 'CLOSED';
 
         $modalAwal = (float) $record->modal_awal;
-        $totalPenjualan = (float) $record->total_penjualan;
+        $totalPenjualan = (float) PosTransaksi::query()
+            ->where('pos_shift_id', $record->id)
+            ->where('status', 'SELESAI')
+            ->where('status_pembayaran', 'LUNAS')
+            ->where('metode_bayar', 'TUNAI')
+            ->sum('grand_total');
         $saldoAktual = (float) $data['saldo_aktual'];
 
         $data['selisih'] = $saldoAktual - ($modalAwal + $totalPenjualan);
@@ -56,91 +64,99 @@ class EditShiftKasir extends EditRecord
             $cabangId = $record->cabang_id ?? (auth()->user()->cabang_id ?? null);
             $selisih = (float) $record->selisih;
 
+            $cfgDefisit = AkunCfg::where('kode_event', 'KAS_DEFISIT')->first();
+            $cfgSurplus = AkunCfg::where('kode_event', 'KAS_SURPLUS')->first();
+            // The setoran is the reverse of the opening-float journal.
+            $cfgSetor = AkunCfg::where('kode_event', 'SHIFT_KASIR')->first();
+
             // 1. Catat Selisih Kasir jika ada
             if ($selisih < 0) {
-                // DEFISIT: Debit Akun Beban/Kerugian Kas (ID: 16), Kredit Akun Kasir POS (ID: 1)
+                if (! $cfgDefisit) {
+                    throw new \RuntimeException('Konfigurasi akun KAS_DEFISIT tidak ditemukan.');
+                }
+
                 $nominalDefisit = abs($selisih);
 
                 $jurnalDefisit = Jurnal::create([
                     'tanggal' => now()->toDateString(),
-                    'nomor_jurnal' => 'JRN-SHF-DEF-' . $record->id . '-' . time(),
+                    'nomor_jurnal' => 'JRN-SHF-DEF-' . Str::upper((string) Str::ulid()),
                     'keterangan' => "Defisit Selisih Shift Kasir (Shift #" . $record->id . "): " . $record->user->name,
                     'referensi_tipe' => get_class($record),
                     'referensi_id' => $record->id,
                     'cabang_id' => $cabangId,
                 ]);
 
-                // Debit: Beban Selisih Kas (16)
                 AkunTrans::create([
                     'jurnal_id' => $jurnalDefisit->id,
-                    'akun_id' => 16,
+                    'akun_id' => $cfgDefisit->akun_debit_id,
                     'debit' => $nominalDefisit,
                     'kredit' => 0,
                 ]);
 
-                // Kredit: Kasir POS (1)
                 AkunTrans::create([
                     'jurnal_id' => $jurnalDefisit->id,
-                    'akun_id' => 1,
+                    'akun_id' => $cfgDefisit->akun_kredit_id,
                     'debit' => 0,
                     'kredit' => $nominalDefisit,
                 ]);
 
             } elseif ($selisih > 0) {
-                // SURPLUS: Debit Akun Kasir POS (ID: 1), Kredit Akun Pendapatan Selisih Kas (ID: 11)
+                if (! $cfgSurplus) {
+                    throw new \RuntimeException('Konfigurasi akun KAS_SURPLUS tidak ditemukan.');
+                }
+
                 $nominalSurplus = $selisih;
 
                 $jurnalSurplus = Jurnal::create([
                     'tanggal' => now()->toDateString(),
-                    'nomor_jurnal' => 'JRN-SHF-SUR-' . $record->id . '-' . time(),
+                    'nomor_jurnal' => 'JRN-SHF-SUR-' . Str::upper((string) Str::ulid()),
                     'keterangan' => "Surplus Selisih Shift Kasir (Shift #" . $record->id . "): " . $record->user->name,
                     'referensi_tipe' => get_class($record),
                     'referensi_id' => $record->id,
                     'cabang_id' => $cabangId,
                 ]);
 
-                // Debit: Kasir POS (1)
                 AkunTrans::create([
                     'jurnal_id' => $jurnalSurplus->id,
-                    'akun_id' => 1,
+                    'akun_id' => $cfgSurplus->akun_debit_id,
                     'debit' => $nominalSurplus,
                     'kredit' => 0,
                 ]);
 
-                // Kredit: Pendapatan Selisih Kas (11)
                 AkunTrans::create([
                     'jurnal_id' => $jurnalSurplus->id,
-                    'akun_id' => 11,
+                    'akun_id' => $cfgSurplus->akun_kredit_id,
                     'debit' => 0,
                     'kredit' => $nominalSurplus,
                 ]);
             }
 
-            // 2. OTOMATIS SETOR: Pindahkan saldo_aktual dari Kasir POS (1) ke Kas Besar (2)
+            // 2. OTOMATIS SETOR: pindahkan saldo fisik laci berdasarkan COA terkonfigurasi.
             $saldoAktual = (float) $record->saldo_aktual;
             if ($saldoAktual > 0) {
-                // Debit: Kas Besar / Brankas (2), Kredit: Kasir POS (1)
+                if (! $cfgSetor) {
+                    throw new \RuntimeException('Konfigurasi akun SHIFT_KASIR tidak ditemukan.');
+                }
+
                 $jurnalSetor = Jurnal::create([
                     'tanggal' => now()->toDateString(),
-                    'nomor_jurnal' => 'JRN-SHF-STR-' . $record->id . '-' . time(),
+                    'nomor_jurnal' => 'JRN-SHF-STR-' . Str::upper((string) Str::ulid()),
                     'keterangan' => "Setoran Shift Kasir Otomatis ke Brankas (Shift #" . $record->id . "): " . $record->user->name,
                     'referensi_tipe' => get_class($record),
                     'referensi_id' => $record->id,
                     'cabang_id' => $cabangId,
                 ]);
 
-                // Debit: Kas Besar / Brankas (2)
                 AkunTrans::create([
                     'jurnal_id' => $jurnalSetor->id,
-                    'akun_id' => 2,
+                    'akun_id' => $cfgSetor->akun_kredit_id,
                     'debit' => $saldoAktual,
                     'kredit' => 0,
                 ]);
 
-                // Kredit: Kasir POS (1)
                 AkunTrans::create([
                     'jurnal_id' => $jurnalSetor->id,
-                    'akun_id' => 1,
+                    'akun_id' => $cfgSetor->akun_debit_id,
                     'debit' => 0,
                     'kredit' => $saldoAktual,
                 ]);

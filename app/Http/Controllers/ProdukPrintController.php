@@ -10,6 +10,8 @@ class ProdukPrintController extends Controller
 {
     public function print(Request $request)
     {
+        $this->requirePermission($request, 'ViewAny:Produk');
+
         $search = $request->search;
         $kategoriId = $request->kategori_id;
 

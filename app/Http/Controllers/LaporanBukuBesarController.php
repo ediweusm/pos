@@ -11,6 +11,8 @@ class LaporanBukuBesarController extends Controller
 {
     private function getLaporanData(Request $request)
     {
+        $this->requirePermission($request, 'ViewAny:AkunMaster');
+
         $request->validate([
             'akun_id' => 'required|exists:akun_master,id',
             'dari_tanggal' => 'required|date',

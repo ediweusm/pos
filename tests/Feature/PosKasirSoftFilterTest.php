@@ -120,7 +120,7 @@ class PosKasirSoftFilterTest extends TestCase
                 Notification::make()
                     ->warning()
                     ->title('Peringatan: Stok Kurang')
-                    ->body("Kuantitas (3) melebihi stok sistem untuk produk Pakan Ayam. Sisa stok: 2. Stok akan menjadi minus.")
+                    ->body("Kuantitas (3) melebihi stok gudang kasir untuk produk Pakan Ayam. Sisa stok: 2. Checkout akan ditolak.")
             );
     }
 }
